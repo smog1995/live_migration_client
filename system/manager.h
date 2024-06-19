@@ -45,23 +45,63 @@ public:
 			uint32_t granted_count_;
 	};
 	LockManager() {
-		row_lock_map_latch_ = false;
+
+		// 初始化table_name
+		// row_lock_map_latch_ = false;
+		vector<string> table_list;
+		string schema_file = "benchmarks/TPCC_full_schema.txt";
+		ifstream fin(schema_file);
+		string line;
+			if (!fin.is_open()) {
+			cerr << "Error: Could not open file " << schema_file << endl;
+			cerr << "Reason: " << strerror(errno) << endl;
+		}
+		while (getline(fin, line)) {
+			// cout << line << " line";
+			if (line.compare(0, 6, "TABLE=") == 0) {
+				table_list.emplace_back(string(&line[6]));
+			}
+		}
+		
+		for (string &table_name: table_list) {
+			row_lock_map_latch_.insert({table_name,false});
+		}
+		
 	}
-	unordered_map<uint64_t, std::shared_ptr<LockRequestQueue>> row_lock_map_;
-	bool row_lock_map_latch_;
-	RC LockRow(txnid_t xid, lock_t lock_type, uint64_t row_key);
-	RC UnlockRow(txnid_t xid, lock_t lock_type, uint64_t row_key);
+	unordered_map<string, unordered_map<uint64_t, std::shared_ptr<LockRequestQueue>>> row_lock_map_;
+	unordered_map<string, bool> row_lock_map_latch_;
+	RC lockRow(TxnManager* txn_man, lock_t lock_type, uint64_t row_key, string table_name);
+	RC unlockRow(TxnManager* txn_man, uint64_t row_key, string table_name);
 	//  S，X
 	bool compatable_lock_[2][2] = {
-		{true, false},
-		{false, false}
+		{false, false},
+		{false, true}
 	};
+	// std::unordered_map<txnid_t, std::vector<txnid_t>> wait_for_;
+	// bool wait_for_latch_;
 	bool Compatibale(lock_t type_a, lock_t type_b) {
 		return compatable_lock_[type_a][type_b];
 	}
+	void deathLockDetection(uint64_t thd_id);
+	txnid_t cycleDetection(std::unordered_map<txnid_t, std::vector<txnid_t>>& waits_for);
+	void depthFirstSearch(txnid_t vertex, bool& has_cycle, txnid_t& youngest_txn, unordered_map<txnid_t, bool>& onpath,
+				 unordered_map<txnid_t, bool>& visited, unordered_map<txnid_t, vector<txnid_t>>& waits_for);
+	void lockRequestDump(uint64_t rowkey, string table_name);
+	
+	
 };
 
+struct TxnEntry {
+	txnid_t txn_id_;
+	std::chrono::system_clock::time_point start_block_time_; //  每次被阻塞，都要重新设置
+	bool remote_txn_ = false;
+	std::chrono::duration<double> blocked_time_;
+	bool blocked = true; // 起初为true
+	TxnEntry(txnid_t txn_id, bool remote_txn,std::chrono::system_clock::time_point start_block_time):txn_id_(txn_id),remote_txn_(remote_txn),start_block_time_(start_block_time){}
+};
+// class Statistics {
 
+// };
 class Manager {
 public:
 	void 			init();
@@ -78,17 +118,26 @@ public:
 	
 	TxnManager * 		get_txn_man(int thd_id) { return _all_txns[thd_id]; };
 	void 			set_txn_man(TxnManager * txn);
+	void 		addBlockedTxn(txnid_t txn_id, bool remote_txn,std::chrono::system_clock::time_point start_block_time);
+	void 		calculateBlockTime(uint64_t thd_id);
+	void 		removeTxn(txnid_t txn_id);
+	void 		setUnblockedTxn(txnid_t txn_id);
+	void		abortOvertimeTxn(uint64_t thd_id, vector<txnid_t> &overtime_txns);
+	LockManager lock_manager;
 private:
 	pthread_mutex_t ts_mutex;
 	uint64_t 		timestamp;
 	pthread_mutex_t mutexes[BUCKET_CNT];
+	unordered_map<txnid_t, unique_ptr<TxnEntry>> blocked_txns;
+	bool blocked_txns_map_latch;
 	uint64_t 		hash(row_t * row);
 	ts_t * volatile all_ts;
 	TxnManager ** 		_all_txns;
 	ts_t			last_min_ts_time;
 	ts_t			min_ts;
+	std::chrono::duration<double>	limit_block_overtime; // <double, std::seconds>应该默认是秒
 	vector<int> local_partitions;
-	LockManager lock_manager;
+	
 };
 
 #endif

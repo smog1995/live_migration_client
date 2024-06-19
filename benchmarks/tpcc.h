@@ -57,9 +57,9 @@ public:
 	RC init_table();
 	RC init_schema(const char * schema_file);
 	RC get_txn_man(TxnManager *& txn_manager);
-	void transportSnapshot(uint64_t thd_id, char* table_name, int dest_id,int part_id);
-	void copyRowData(char* table_name, int part_id, int tuple_count, char* row_data);
-	void printTable();
+	void transportSnapshot(uint64_t thd_id, char* table_index_name, int dest_id,int part_id) override; // myt add
+	void copyRowData(char* table_name, int part_id, int tuple_count, char* row_data) override;  // myt add
+	void printTable(string table_index_name) ;
 	table_t * 		t_warehouse;
 	table_t * 		t_district;
 	table_t * 		t_customer;

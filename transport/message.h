@@ -94,10 +94,10 @@ public:
   void copy_to_buf(char* buf);
   void copy_from_txn(TxnManager * txn){}
   void copy_to_txn(TxnManager * txn){}
-  uint64_t get_size(){
+  uint64_t get_size() {
     uint64_t size = Message::mget_size();
     size += sizeof(finish) + sizeof(live_migration_stage) + sizeof(migration_dest_id) + sizeof(part_id) 
-            + sizeof(table_name);
+            + sizeof(table_index_name);
     return size;
   }
   void release();
@@ -106,7 +106,7 @@ public:
   int live_migration_stage;
   int migration_dest_id; //  要迁移到哪个目标节点,源节点在入消息队列时已指定
   int part_id;
-  char table_name[TABLE_NAME_SIZE];
+  char table_index_name[TABLE_NAME_SIZE];
 };
 
 class LiveMigrationAckMessage : public Message {
@@ -144,7 +144,7 @@ public:
   // int table_name_size;
   // int buffer_size;
   int tuple_count;
-  char table_name[TABLE_NAME_SIZE];
+  char table_index_name[TABLE_NAME_SIZE];   //  table的index_name,后来改的,比较方便
   char snapshot_buffer[MIGRATION_BUFFER_SIZE];
   void init() {
   }
@@ -155,7 +155,7 @@ public:
   uint64_t get_size() {
     uint64_t size = Message::mget_size();
     size += sizeof(finish) + sizeof(part_id) 
-            + sizeof(tuple_count) + sizeof(table_name) + sizeof(snapshot_buffer);
+            + sizeof(tuple_count) + sizeof(table_index_name) + sizeof(snapshot_buffer);
     return size;
   }
   void release();
@@ -184,6 +184,27 @@ public:
     return size;
   }
   void release(){}
+};
+
+class TxnAbortMessage : public Message {
+public:
+  void init() {}
+  void copy_from_buf(char* buf) {
+    mcopy_from_buf(buf);
+  }
+  void copy_to_buf(char* buf) {
+    mcopy_to_buf(buf);
+  }
+  void copy_from_txn(TxnManager* txn) {
+    mcopy_from_txn(txn);
+  }
+  void copy_to_txn(TxnManager* txn) {
+    mcopy_to_txn(txn);
+  }
+  uint64_t get_size() {
+    return Message::mget_size();
+  }
+  void release() {}
 };
 
 class FinishMessage : public Message {
@@ -451,7 +472,7 @@ public:
 #if CC_ALG == WAIT_DIE || CC_ALG == TIMESTAMP || CC_ALG == MVCC
   uint64_t ts;
 #endif
-#if CC_ALG == MVCC 
+#if CC_ALG == MVCC || CC_ALG == MVCC2PL
   uint64_t thd_id;
 #elif CC_ALG == OCC 
   uint64_t start_ts;

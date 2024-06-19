@@ -15,11 +15,14 @@
 class Workload;
 void MigrationThread::setup() {
     cout << "migrationThread setup" << endl;
+    live_migration_stage = SNAPSHOT_TRANS;
+    cur_table_index = 0;
     schema_file = "benchmarks/TPCC_full_schema.txt";
     finished = false;
     cout << schema_file << "路径";
     init_migration_table_list();
 }
+
 void MigrationThread::init_migration_table_list() {
     ifstream fin(schema_file);
     string line;
@@ -30,46 +33,86 @@ void MigrationThread::init_migration_table_list() {
     }
     while (getline(fin, line)) {
       // cout << line << " line";
-		if (line.compare(0, 6, "TABLE=") == 0) {
-            table_name.emplace_back(string(&line[6]));
+		if (line.compare(0, 6, "INDEX=") == 0) {
+            table_indexs_name.emplace_back(string(&line[6]));
             ++table_count;
-            cout << table_name[table_count - 1] << "table_name" << endl;
+            cout << table_indexs_name[table_count - 1] << "tableindex_name" << endl;
         }
     }
     cout << "init_migration_table_list finish" << endl;
+}
+
+void MigrationThread::change_stage() {
+  switch(live_migration_stage) {
+    case SNAPSHOT_TRANS :
+      ++cur_table_index;
+      if (cur_table_index == table_indexs_name.size()) {
+        receive_time = std::chrono::system_clock::now();
+        stage_time_cost[live_migration_stage] = receive_time - start_time;
+        printf("传输快照阶段用时:%lf (s)\n",stage_time_cost[live_migration_stage].count());
+        live_migration_stage = ASYNC_LOGS;
+        start_time = receive_time;
+        printf("进入二阶段，异步日志传输\n");
+      }
+      break;
+    case ASYNC_LOGS :
+      receive_time = std::chrono::system_clock::now();
+      stage_time_cost[live_migration_stage] = receive_time - start_time;
+      printf("异步日志传输阶段用时:%lf (s)\n",stage_time_cost[live_migration_stage].count());
+      live_migration_stage = SYNC_EXEC;
+      start_time = receive_time;
+      printf("进入三阶段,同步执行阶段\n");
+      break;
+    case SYNC_EXEC :
+      receive_time = std::chrono::system_clock::now();
+      stage_time_cost[live_migration_stage] = receive_time - start_time;
+      printf("同步执行阶段用时:%lf (s)\n",stage_time_cost[live_migration_stage].count());
+      start_time = receive_time;
+      printf("finish\n");
+      break;
+    default :
+      assert(false);
+      break;
+  }
 }
 
 RC MigrationThread::run() {
   tsetup();
   printf("Running LiveMigrationThread \n");
   int index = 0;
-  LiveMigrationMessage* start_msg = (LiveMigrationMessage*)Message::create_message(MIGRATION_MSG);
-//   start_msg->src_id = 0;
-  start_msg->migration_dest_id = 1;
-  start_msg->part_id = 0;
-  // start_msg->table_name_size = table_name[index].size();
-  start_msg->finish = false;
-  start_msg->live_migration_stage = 1;
-  // start_msg->table_name = (char*) mem_allocator.alloc(20);
-  // start_msg->table_name = new char[start_msg->table_name_size];
-  memcpy(start_msg->table_name, table_name[index].c_str(), table_name[index].size());
-  cout << start_msg->table_name << "发送迁移卡其消息";
-  msg_queue.enqueue(0, start_msg, 0); // 发送到服务器0
+  LiveMigrationMessage* snap_msg = (LiveMigrationMessage*)Message::create_message(MIGRATION_MSG); // 会在msg线程进行释放
+  snap_msg->migration_dest_id = 1; 
+  snap_msg->part_id = 0;
+  snap_msg->finish = false;
+  snap_msg->live_migration_stage = SNAPSHOT_TRANS;
+  memcpy(snap_msg->table_index_name, table_indexs_name[cur_table_index].c_str(), table_indexs_name[cur_table_index].size());
+  msg_queue.enqueue(get_thd_id(), snap_msg, 0); // 发送到服务器0
+  printf("开始进行迁移\n");
+ 
+  printf("快照传输阶段\n");
+  printf("开始传输表index%s\n",table_indexs_name[cur_table_index].c_str());
+  
+  std::chrono::system_clock::time_point start_time = std::chrono::system_clock::now();
   while(!finished) {
     Message* msg = work_queue.migration_dequeue();
     if(!msg) {
       continue;
     }
-    if (msg->get_rtype() == MIGRATION_ACK) {
-        LiveMigrationAckMessage *migration_ack = (LiveMigrationAckMessage*) msg;
-        if (migration_ack->finish && migration_ack->live_migration_stage == 1) {
-            cout << "阶段" << migration_ack->live_migration_stage << "完成" << endl;
-            finished = true;
-        }
-    } else {
-        cout << "msg类型为" << msg->get_rtype() << " ";
+    assert(msg->get_rtype() == MIGRATION_ACK);
+    change_stage();
+    // LiveMigrationAckMessage *migration_ack = (LiveMigrationAckMessage*) msg;  
+    //  TODO : 后续可能需要处理ack，进行失败重传之类
+    
+    if (live_migration_stage == SNAPSHOT_TRANS) {
+      snap_msg = (LiveMigrationMessage*)Message::create_message(MIGRATION_MSG); // 会在msg线程进行释放
+      snap_msg->migration_dest_id = 1; 
+      snap_msg->part_id = 0;
+      snap_msg->finish = false;
+      snap_msg->live_migration_stage = SNAPSHOT_TRANS;
+      memcpy(snap_msg->table_index_name, table_indexs_name[cur_table_index].c_str(), table_indexs_name[cur_table_index].size());
+      msg_queue.enqueue(get_thd_id(), snap_msg, 0);
+      printf("开始传输表index%s\n",table_indexs_name[cur_table_index].c_str());
     }
-   
   }
 
   fflush(stdout);

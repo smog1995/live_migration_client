@@ -154,6 +154,7 @@ Message * Message::create_message(RemReqType rtype) {
     case CL_QRY:
     case RTXN:
     case RTXN_CONT:
+    
 #if WORKLOAD == YCSB
       msg = new YCSBClientQueryMessage;
 #elif WORKLOAD == TPCC 
@@ -186,6 +187,9 @@ Message * Message::create_message(RemReqType rtype) {
       break;
     case MIGRATION_ACK:
       msg = new LiveMigrationAckMessage;
+      break;
+    case RTXN_ABORT:    //  myt add，作用是通知系统终止该事务
+      msg = new TxnAbortMessage;
       break;
     default: assert(false);
   }
@@ -403,6 +407,12 @@ void Message::release_message(Message * msg) {
     }
     case MIGRATION_ACK: {
       LiveMigrationAckMessage * m_msg = (LiveMigrationAckMessage*)msg;
+      m_msg->release();
+      delete m_msg;
+      break;
+    }
+    case RTXN_ABORT: {
+      TxnAbortMessage * m_msg = (TxnAbortMessage*)msg;
       m_msg->release();
       delete m_msg;
       break;
@@ -1846,7 +1856,7 @@ void SnapshotMessage::copy_from_buf(char *buf) {
   // cout << buffer_size<< " ";
   COPY_VAL(tuple_count, buf, ptr);
   //  table_name = (char*)mem_allocator.alloc(table_name_size);
-  COPY_VAL_SIZE(table_name, buf, ptr, TABLE_NAME_SIZE);
+  COPY_VAL_SIZE(table_index_name, buf, ptr, TABLE_NAME_SIZE);
   //  snapshot_buffer = (char*) mem_allocator.alloc(buffer_size);
   COPY_VAL_SIZE(snapshot_buffer, buf, ptr, MIGRATION_BUFFER_SIZE);
   // for (size_t i = 0; i < buffer_size; i++) {
@@ -1866,7 +1876,7 @@ void SnapshotMessage::copy_to_buf(char * buf) {
   // COPY_BUF(buf, table_name_size, ptr);
   // COPY_BUF(buf, buffer_size, ptr);
   COPY_BUF(buf, tuple_count, ptr);
-  COPY_BUF_SIZE(buf, table_name, ptr, TABLE_NAME_SIZE);
+  COPY_BUF_SIZE(buf, table_index_name, ptr, TABLE_NAME_SIZE);
   COPY_BUF_SIZE(buf, snapshot_buffer, ptr, MIGRATION_BUFFER_SIZE);
   cout << ptr << "buffer_size" << ptr;
   // for (size_t i = 0; i < MIGRATION_BUFFER_SIZE; i++) {
@@ -1878,10 +1888,6 @@ void SnapshotMessage::copy_to_buf(char * buf) {
 
 
 void SnapshotMessage::release() {
-  // mem_allocator.free(table_name, table_name_size);
-  // mem_allocator.free(snapshot_buffer, buffer_size);
-  delete[] snapshot_buffer;
-  // delete[] table_name;
 }
 
   // uint8_t live_migration_state;
@@ -1900,9 +1906,9 @@ void LiveMigrationMessage::copy_from_buf(char * buf) {
   // COPY_VAL(table_name_size, buf, ptr);
   // table_name = new char[table_name_size];
   // table_name = (char*)mem_allocator.alloc(table_name_size);
-  COPY_VAL_SIZE(table_name, buf, ptr, TABLE_NAME_SIZE);
+  COPY_VAL_SIZE(table_index_name, buf, ptr, TABLE_NAME_SIZE);
   // memcpy(table_name, buf + ptr, table_name_size);
-  cout << table_name << "封装的消息包";
+  cout << table_index_name << "封装的消息包";
   cout << finish << live_migration_stage << migration_dest_id << part_id << endl;
   // ptr += table_name_size;
   assert(ptr == get_size());
@@ -1915,7 +1921,7 @@ void LiveMigrationMessage::copy_to_buf(char* buf) {
   COPY_BUF(buf, migration_dest_id, ptr);
   COPY_BUF(buf, part_id, ptr);
   // COPY_BUF(buf, table_name_size, ptr);
-  COPY_BUF_SIZE(buf, *table_name, ptr, TABLE_NAME_SIZE);
+  COPY_BUF_SIZE(buf, *table_index_name, ptr, TABLE_NAME_SIZE);
   assert(ptr == get_size());
 }
 void LiveMigrationMessage::release() {

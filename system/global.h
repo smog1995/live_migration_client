@@ -237,6 +237,7 @@ extern UInt32 g_seq_thread_cnt;
 extern UInt32 g_repl_type;
 extern UInt32 g_repl_cnt;
 
+enum migration_stage { SNAPSHOT_TRANS = 0, ASYNC_LOGS, SYNC_EXEC};
 enum RC { RCOK=0, Commit, Abort, WAIT, WAIT_REM, ERROR, FINISH, NONE };
 enum RemReqType {INIT_DONE=0,
     RLK,
@@ -268,9 +269,9 @@ enum RemReqType {INIT_DONE=0,
     SNAPSHOT_MSG,
     SNAPSHOT_ACK,
     MIGRATION_MSG,
-    MIGRATION_ACK
+    MIGRATION_ACK,
+    RTXN_ABORT
     };
-
 // Calvin
 enum CALVIN_PHASE {CALVIN_RW_ANALYSIS=0,CALVIN_LOC_RD,CALVIN_SERVE_RD,CALVIN_COLLECT_RD,CALVIN_EXEC_WR,CALVIN_DONE};
 
